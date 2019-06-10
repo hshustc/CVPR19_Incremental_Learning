@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Learning a Unified Classifier Incrementally via Rebalancing</title>
+    <meta property="og:title" content="Lifelong Learning via Progressive Distillation and Retrospection">
+    <meta property="og:type" content="website">
+    <link href="lib/normalize.css" type="text/css" rel="stylesheet">
+    <link href="lib/font-awesome/css/font-awesome.min.css" type="text/css" rel="stylesheet">
+    <link href="main.css" type="text/css" rel="stylesheet">
+    <script src="//use.typekit.net/ulc1wme.js"></script>
+    <script type="text/javascript" async
+      src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-MML-AM_CHTML" async>
+      </script>
+    <script>try{Typekit.load();}catch(e){}</script>
+  </head>
+  <body>
+    <div class="header"><div class="container">
+      <h1 class="logo">Learning a Unified Classifier Incrementally via Rebalancing</h1>
+      <div class="tagline">
+        <a href="http://home.ustc.edu.cn/~saihui/index_english.html" target="_blank" style="color:inherit">Saihui Hou</a><sup>1*</sup>&nbsp;&nbsp;&nbsp;
+        <a href="http://piffnp.github.io/" target="_blank" style="color:inherit">Xinyu Pan</a><sup>2*</sup>&nbsp;&nbsp;&nbsp;
+        <a href="http://personal.ie.cuhk.edu.hk/~ccloy" target="_blank" style="color:inherit">Chen Change Loy</a><sup>3</sup>&nbsp;&nbsp;&nbsp;
+        <a href="http://staff.ustc.edu.cn/~zlwang/index_en.html" target="_blank" style="color:inherit">Zilei Wang</a><sup>1</sup>&nbsp;&nbsp;&nbsp;
+        <a href="http://dahua.me" target="_blank" style="color:inherit">Dahua Lin</a><sup>2</sup>&nbsp;&nbsp;&nbsp;<br><br>
+        <sup>1</sup> University of Science and Technology of China&nbsp;&nbsp;&nbsp;&nbsp;
+        <sup>2</sup> The Chinese University of Hong Kong&nbsp;&nbsp;&nbsp;&nbsp;<br>
+        <sup>3</sup> Nanyang Technological University&nbsp;&nbsp;&nbsp;&nbsp;
+        [* indicates joint first authorship]
+      </div>
+      <div class="cta">
+          <a href="res/1165.pdf" role="button"><i class="fa fa-file-pdf-o"></i> Paper</a>
+          <a href="https://github.com/hshustc/CVPR19_Incremental_Learning" role="button"><i class="fa fa-github"></i> Code</a>
+          <a href="res/cvpr19_lifelong_bib.txt" role="button"><i class="fa fa-quote-right"></i> Bib</a>
+      </div>
+    </div></div>
+
+    <div class="main"><div class="container">
+      <center><img width=700px alt="" src="res/challenges.png"></center>
+      <p class="long_caption">Fig 1.&nbsp;Illustration of the adverse effects caused by the <i>imbalance</i> between old and new classes in <i>multi-class</i> incremental learning, and how our approach tackle them.</p>
+      <h2>Abstract</h2>
+      Conventionally, deep neural networks are trained offline, relying on a large dataset prepared in advance. This paradigm is often challenged in real-world applications, e.g. online services that involve continuous streams of incoming data. Recently, incremental learning receives increasing attention, and is considered as a promising solution to the practical challenges mentioned above. However, it has been observed that incremental learning is subject to a fundamental difficulty – catastrophic forgetting, namely adapting a model to new data often results in severe performance degradation on previous tasks or classes. Our study reveals that the imbalance between previous and new data is a crucial cause to this problem. In this work, we develop a new framework for incrementally learning a unified classifier, i.e. a classifier that treats both old and new classes uniformly. Specifically, we incorporate three components, cosine normalization, less-forget constraint, and inter-class separation, to mitigate the adverse effects of the imbalance. Experiments show that the proposed method can effectively rebalance the training process, thus obtaining superior performance compared to the existing methods. On CIFAR-100 and ImageNet, our method can reduce the classification errors by more than 6% and 13% respectively, under the incremental setting of 10 phases.<br>
+
+      <h2>Architcture</h2>
+      <center><img width=960px alt="" src="res/network_structures.png"></center>
+      <p class="long_caption">Fig 2.&nbsp;Illustration of our approach for <i>multi-class</i> incremental learning. Due to <i>cosine normalization</i>, the features and class embeddings lie in a high-dimensional sphere geometrically. There are three types of loss involved in the incremental process. Besides the cross-entropy loss \(L_{\mathrm{ce}}\) computed on all classes, \(L^{\mathrm{G}}_{\mathrm{dis}}\) is a novel distillation loss computed on the features (<i>less-forget constraint</i>), and \(L_{\mathrm{mr}}\) is a variant of margin ranking loss to separate the old and new classes (<i>inter-class separation</i>).</p>
+
+      <h2>Performance</h2>
+      <center><img width=960px alt="" src="res/cifar.png"></center>
+      <p class="caption">Fig 3.&nbsp;The performance on CIFAR100. The average and standard deviations are obtained over three runs.</p>
+      <center><img width=960px alt="" src="res/imagenet.png"></center>
+      <p class="caption">Fig 4.&nbsp;The performance on ImageNet. Reported on ImageNet-Subset (100 classes) and ImageNet-Full (1000 classes).</p>
+
+      <h2>Related Publication</h2>
+      <b>Lifelong Learning via Progressive Distillation and Retrospection.</b> Saihui Hou, Xinyu Pan, Chen Change Loy, Zilei Wang, Dahua Lin. In Proceedings of European Conference on Computer Vision (ECCV), 2018 
+      &nbsp;[<a href="http://mmlab.ie.cuhk.edu.hk/projects/lifelong/res/0833.pdf" target="_blank">PDF</a>]
+      &nbsp;[<a href="http://mmlab.ie.cuhk.edu.hk/projects/lifelong/" target="_blank">Project Page</a>]
+      &nbsp;[<a href="https://github.com/hshustc/ECCV18_Lifelong_Learning" target="_blank">Code</a>]
+      
+    </div></div>
+
+    <div class="footer"><div class="container">
+      <div class="updated">Updated May 2019</div>
+    </div></div>
+
+    <script>
+        // TODO maybe google analytics
+    </script>
+  </body>
+</html>
+
