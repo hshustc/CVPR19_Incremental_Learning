@@ -21,9 +21,11 @@ except:
     import pickle
 import math
 
-import modified_resnet_cifar
+import modified_resnet
 import modified_linear
 import utils_pytorch
+from utils_imagenet.utils_dataset import split_images_labels
+from utils_imagenet.utils_dataset import merge_images_labels
 from utils_incremental.compute_features import compute_features
 from utils_incremental.compute_accuracy import compute_accuracy
 from utils_incremental.compute_confusion_matrix import compute_confusion_matrix
@@ -35,8 +37,11 @@ from utils_incremental.incremental_train_and_eval_AMR_LF import incremental_trai
 
 ######### Modifiable Settings ##########
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='cifar100', type=str)
+parser.add_argument('--dataset', default='seed_1993_subset_100_imagenet', type=str)
+parser.add_argument('--datadir', default='data/seed_1993_subset_100_imagenet/data', type=str)
 parser.add_argument('--num_classes', default=100, type=int)
+parser.add_argument('--num_workers', default=16, type=int, \
+    help='the number of workers for loading data')
 parser.add_argument('--nb_cl_fg', default=50, type=int, \
     help='the number of classes in first group')
 parser.add_argument('--nb_cl', default=10, type=int, \
@@ -47,7 +52,7 @@ parser.add_argument('--nb_runs', default=1, type=int, \
     help='Number of runs (random ordering of classes at each run)')
 parser.add_argument('--ckp_prefix', default=os.path.basename(sys.argv[0])[:-3], type=str, \
     help='Checkpoint prefix')
-parser.add_argument('--epochs', default=160, type=int, \
+parser.add_argument('--epochs', default=90, type=int, \
     help='Epochs')
 parser.add_argument('--T', default=2, type=float, \
     help='Temporature for distialltion')
@@ -87,61 +92,77 @@ parser.add_argument('--lw_mr', default=1, type=float, \
 ########################################
 parser.add_argument('--random_seed', default=1993, type=int, \
     help='random seed')
-########################################
-parser.add_argument('--cb_finetune', action='store_true', \
-    help='class balance finetune')
-parser.add_argument('--ft_epochs', default=20, type=int, \
-    help='Epochs for class balance finetune')
-parser.add_argument('--ft_base_lr', default=0.01, type=float, \
-    help='Base learning rate for class balance finetune')
-parser.add_argument('--ft_lr_strat', default=[10], type=int, nargs='+', \
-    help='Lr_strat for class balance finetune')
-parser.add_argument('--ft_flag', default=2, type=int, \
-    help='Flag for class balance finetune')
 args = parser.parse_args()
 
 ########################################
 assert(args.nb_cl_fg % args.nb_cl == 0)
 assert(args.nb_cl_fg >= args.nb_cl)
 train_batch_size       = 128            # Batch size for train
-test_batch_size        = 100            # Batch size for test
+test_batch_size        = 50             # Batch size for test
 eval_batch_size        = 128            # Batch size for eval
 base_lr                = 0.1            # Initial learning rate
-lr_strat               = [80, 120]      # Epochs where learning rate gets decreased
+lr_strat               = [30, 60]       # Epochs where learning rate gets decreased
 lr_factor              = 0.1            # Learning rate decrease factor
-custom_weight_decay    = 5e-4           # Weight Decay
+custom_weight_decay    = 1e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
 args.ckp_prefix        = '{}_nb_cl_fg_{}_nb_cl_{}_nb_protos_{}'.format(args.ckp_prefix, args.nb_cl_fg, args.nb_cl, args.nb_protos)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 ########################################
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5071,  0.4866,  0.4409), (0.2009,  0.1984,  0.2023)),
-])
-transform_test = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.5071,  0.4866,  0.4409), (0.2009,  0.1984,  0.2023)),
-])
-trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
-                                        download=True, transform=transform_train)
-testset = torchvision.datasets.CIFAR100(root='./data', train=False,
-                                       download=True, transform=transform_test)
-evalset = torchvision.datasets.CIFAR100(root='./data', train=False,
-                                       download=False, transform=transform_test)
+#transform_train = transforms.Compose([
+#    transforms.RandomCrop(32, padding=4),
+#    transforms.RandomHorizontalFlip(),
+#    transforms.ToTensor(),
+#    transforms.Normalize((0.5071,  0.4866,  0.4409), (0.2009,  0.1984,  0.2023)),
+#])
+#transform_test = transforms.Compose([
+#    transforms.ToTensor(),
+#    transforms.Normalize((0.5071,  0.4866,  0.4409), (0.2009,  0.1984,  0.2023)),
+#])
+#trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
+#                                        download=True, transform=transform_train)
+#testset = torchvision.datasets.CIFAR100(root='./data', train=False,
+#                                       download=True, transform=transform_test)
+#evalset = torchvision.datasets.CIFAR100(root='./data', train=False,
+#                                       download=False, transform=transform_test)
+# Data loading code
+traindir = os.path.join(args.datadir, 'train')
+valdir = os.path.join(args.datadir, 'val')
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+trainset = datasets.ImageFolder(
+    traindir,
+    transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize,
+    ]))
+testset =  datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ]))
+evalset =  datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ]))
 
 # Initialization
-dictionary_size     = 500
+dictionary_size     = 1500
 top1_acc_list_cumul = np.zeros((int(args.num_classes/args.nb_cl),3,args.nb_runs))
 top1_acc_list_ori   = np.zeros((int(args.num_classes/args.nb_cl),3,args.nb_runs))
 
-X_train_total = np.array(trainset.train_data)
-Y_train_total = np.array(trainset.train_labels)
-X_valid_total = np.array(testset.test_data)
-Y_valid_total = np.array(testset.test_labels)
+#X_train_total = np.array(trainset.train_data)
+#Y_train_total = np.array(trainset.train_labels)
+#X_valid_total = np.array(testset.test_data)
+#Y_valid_total = np.array(testset.test_labels)
+X_train_total, Y_train_total = split_images_labels(trainset.imgs)
+X_valid_total, Y_valid_total = split_images_labels(testset.imgs)
 
 # Launch the different runs
 for iteration_total in range(args.nb_runs):
@@ -170,9 +191,11 @@ for iteration_total in range(args.nb_runs):
 
     # The following contains all the training samples of the different classes
     # because we want to compare our method with the theoretical case where all the training samples are stored
-    prototypes = np.zeros((args.num_classes,dictionary_size,X_train_total.shape[1],X_train_total.shape[2],X_train_total.shape[3]))
+    # prototypes = np.zeros((args.num_classes,dictionary_size,X_train_total.shape[1],X_train_total.shape[2],X_train_total.shape[3]))
+    prototypes = [[] for i in range(args.num_classes)]
     for orde in range(args.num_classes):
-        prototypes[orde,:,:,:,:] = X_train_total[np.where(Y_train_total==order[orde])]
+        prototypes[orde] = X_train_total[np.where(Y_train_total==order[orde])]
+    prototypes = np.array(prototypes)
 
     start_iter = int(args.nb_cl_fg/args.nb_cl)-1
     for iteration in range(start_iter, int(args.num_classes/args.nb_cl)):
@@ -181,7 +204,7 @@ for iteration_total in range(args.nb_runs):
             ############################################################
             last_iter = 0
             ############################################################
-            tg_model = modified_resnet_cifar.resnet32(num_classes=args.nb_cl_fg)
+            tg_model = modified_resnet.resnet18(num_classes=args.nb_cl_fg)
             in_features = tg_model.fc.in_features
             out_features = tg_model.fc.out_features
             print("in_features:", in_features, "out_features:", out_features)
@@ -257,7 +280,7 @@ for iteration_total in range(args.nb_runs):
                 #1/rs_ratio = (len(X_train)+len(X_protoset)*scale_factor)/(len(X_protoset)*scale_factor)
                 scale_factor = (len(X_train) * args.rs_ratio) / (len(X_protoset) * (1 - args.rs_ratio))
                 rs_sample_weights = np.concatenate((np.ones(len(X_train)), np.ones(len(X_protoset))*scale_factor))
-                #number of samples per epoch, undersample on the new classes
+                #number of samples per epoch
                 #rs_num_samples = len(X_train) + len(X_protoset)
                 rs_num_samples = int(len(X_train) / (1 - args.rs_ratio))
                 print("X_train:{}, X_protoset:{}, rs_num_samples:{}".format(len(X_train), len(X_protoset), rs_num_samples))
@@ -284,12 +307,14 @@ for iteration_total in range(args.nb_runs):
             novel_embedding = torch.zeros((args.nb_cl, num_features))
             for cls_idx in range(iteration*args.nb_cl, (iteration+1)*args.nb_cl):
                 cls_indices = np.array([i == cls_idx  for i in map_Y_train])
-                assert(len(np.where(cls_indices==1)[0])==dictionary_size)
-                evalset.test_data = X_train[cls_indices].astype('uint8')
-                evalset.test_labels = np.zeros(evalset.test_data.shape[0]) #zero labels
+                assert(len(np.where(cls_indices==1)[0])<=dictionary_size)
+                #evalset.test_data = X_train[cls_indices].astype('uint8')
+                #evalset.test_labels = np.zeros(evalset.test_data.shape[0]) #zero labels
+                current_eval_set = merge_images_labels(X_train[cls_indices], np.zeros(len(X_train[cls_indices])))
+                evalset.imgs = evalset.samples = current_eval_set
                 evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
                     shuffle=False, num_workers=2)
-                num_samples = evalset.test_data.shape[0]
+                num_samples = len(X_train[cls_indices])
                 cls_features = compute_features(tg_feature_model, evalloader, num_samples, num_features)
                 #cls_features = cls_features.T
                 #cls_features = cls_features / np.linalg.norm(cls_features,axis=0)
@@ -304,21 +329,29 @@ for iteration_total in range(args.nb_runs):
             #torch.save(tg_model, "tg_model_after_imprint_weights.pth")
 
         ############################################################
-        trainset.train_data = X_train.astype('uint8')
-        trainset.train_labels = map_Y_train
+        #trainset.train_data = X_train.astype('uint8')
+        #trainset.train_labels = map_Y_train
+        current_train_imgs = merge_images_labels(X_train, map_Y_train)
+        trainset.imgs = trainset.samples = current_train_imgs
         if iteration > start_iter and args.rs_ratio > 0 and scale_factor > 1:
             print("Weights from sampling:", rs_sample_weights)
             index1 = np.where(rs_sample_weights>1)[0]
             index2 = np.where(map_Y_train<iteration*args.nb_cl)[0]
             assert((index1==index2).all())
             train_sampler = torch.utils.data.sampler.WeightedRandomSampler(rs_sample_weights, rs_num_samples)
+            #trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch_size, \
+            #    shuffle=False, sampler=train_sampler, num_workers=2)
             trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch_size, \
-                shuffle=False, sampler=train_sampler, num_workers=2)            
+                shuffle=False, sampler=train_sampler, num_workers=args.num_workers, pin_memory=True)             
         else:
+            #trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch_size,
+            #    shuffle=True, num_workers=2)
             trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch_size,
-                shuffle=True, num_workers=2)
-        testset.test_data = X_valid_cumul.astype('uint8')
-        testset.test_labels = map_Y_valid_cumul
+                shuffle=True, num_workers=args.num_workers, pin_memory=True)
+        #testset.test_data = X_valid_cumul.astype('uint8')
+        #testset.test_labels = map_Y_valid_cumul
+        current_test_imgs = merge_images_labels(X_valid_cumul, map_Y_valid_cumul)
+        testset.imgs = testset.samples = current_test_imgs
         testloader = torch.utils.data.DataLoader(testset, batch_size=test_batch_size,
             shuffle=False, num_workers=2)
         print('Max and Min of train labels: {}, {}'.format(min(map_Y_train), max(map_Y_train)))
@@ -389,7 +422,7 @@ for iteration_total in range(args.nb_runs):
 
         ### Exemplars
         if args.fix_budget:
-            nb_protos_cl = int(np.ceil(args.nb_protos*100./args.nb_cl/(iteration+1)))
+            nb_protos_cl = int(np.ceil(args.nb_protos*args.num_classes*1.0/args.nb_cl/(iteration+1)))
         else:
             nb_protos_cl = args.nb_protos
         tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
@@ -398,11 +431,13 @@ for iteration_total in range(args.nb_runs):
         print('Updating exemplar set...')
         for iter_dico in range(last_iter*args.nb_cl, (iteration+1)*args.nb_cl):
             # Possible exemplars in the feature space and projected on the L2 sphere
-            evalset.test_data = prototypes[iter_dico].astype('uint8')
-            evalset.test_labels = np.zeros(evalset.test_data.shape[0]) #zero labels
+            # evalset.test_data = prototypes[iter_dico].astype('uint8')
+            # evalset.test_labels = np.zeros(evalset.test_data.shape[0]) #zero labels
+            current_eval_set = merge_images_labels(prototypes[iter_dico], np.zeros(len(prototypes[iter_dico])))
+            evalset.imgs = evalset.samples = current_eval_set
             evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                shuffle=False, num_workers=2)
-            num_samples = evalset.test_data.shape[0]            
+                shuffle=False, num_workers=args.num_workers, pin_memory=True)
+            num_samples = len(prototypes[iter_dico])            
             mapped_prototypes = compute_features(tg_feature_model, evalloader, num_samples, num_features)
             D = mapped_prototypes.T
             D = D/np.linalg.norm(D,axis=0)
@@ -430,66 +465,77 @@ for iteration_total in range(args.nb_runs):
 
         # Class means for iCaRL and NCM + Storing the selected exemplars in the protoset
         print('Computing mean-of_exemplars and theoretical mean...')
-        class_means = np.zeros((64,100,2))
+        # class_means = np.zeros((64,100,2))
+        class_means = np.zeros((num_features, args.num_classes, 2))
         for iteration2 in range(iteration+1):
             for iter_dico in range(args.nb_cl):
                 current_cl = order[range(iteration2*args.nb_cl,(iteration2+1)*args.nb_cl)]
 
                 # Collect data in the feature space for each class
-                evalset.test_data = prototypes[iteration2*args.nb_cl+iter_dico].astype('uint8')
-                evalset.test_labels = np.zeros(evalset.test_data.shape[0]) #zero labels
+                # evalset.test_data = prototypes[iteration2*args.nb_cl+iter_dico].astype('uint8')
+                # evalset.test_labels = np.zeros(evalset.test_data.shape[0]) #zero labels
+                current_eval_set = merge_images_labels(prototypes[iteration2*args.nb_cl+iter_dico], \
+                    np.zeros(len(prototypes[iteration2*args.nb_cl+iter_dico])))
+                evalset.imgs = evalset.samples = current_eval_set
                 evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-                num_samples = evalset.test_data.shape[0]
+                    shuffle=False, num_workers=args.num_workers, pin_memory=True)
+                num_samples = len(prototypes[iteration2*args.nb_cl+iter_dico])
                 mapped_prototypes = compute_features(tg_feature_model, evalloader, num_samples, num_features)
                 D = mapped_prototypes.T
                 D = D/np.linalg.norm(D,axis=0)
                 # Flipped version also
-                evalset.test_data = prototypes[iteration2*args.nb_cl+iter_dico][:,:,:,::-1].astype('uint8')
-                evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-                mapped_prototypes2 = compute_features(tg_feature_model, evalloader, num_samples, num_features)
-                D2 = mapped_prototypes2.T
-                D2 = D2/np.linalg.norm(D2,axis=0)
+                # evalset.test_data = prototypes[iteration2*args.nb_cl+iter_dico][:,:,:,::-1].astype('uint8')
+                # evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
+                #     shuffle=False, num_workers=2)
+                # mapped_prototypes2 = compute_features(tg_feature_model, evalloader, num_samples, num_features)
+                # D2 = mapped_prototypes2.T
+                # D2 = D2/np.linalg.norm(D2,axis=0)
+                D2 = D
 
                 # iCaRL
                 alph = alpha_dr_herding[iteration2,:,iter_dico]
+                assert((alph[num_samples:]==0).all())
+                alph = alph[:num_samples]
                 alph = (alph>0)*(alph<nb_protos_cl+1)*1.
-                X_protoset_cumuls.append(prototypes[iteration2*args.nb_cl+iter_dico,np.where(alph==1)[0]])
+                # X_protoset_cumuls.append(prototypes[iteration2*args.nb_cl+iter_dico,np.where(alph==1)[0]])
+                X_protoset_cumuls.append(prototypes[iteration2*args.nb_cl+iter_dico][np.where(alph==1)[0]])
                 Y_protoset_cumuls.append(order[iteration2*args.nb_cl+iter_dico]*np.ones(len(np.where(alph==1)[0])))
                 alph = alph/np.sum(alph)
                 class_means[:,current_cl[iter_dico],0] = (np.dot(D,alph)+np.dot(D2,alph))/2
                 class_means[:,current_cl[iter_dico],0] /= np.linalg.norm(class_means[:,current_cl[iter_dico],0])
 
                 # Normal NCM
-                alph = np.ones(dictionary_size)/dictionary_size
+                # alph = np.ones(dictionary_size)/dictionary_size
+                alph = np.ones(num_samples)/num_samples
                 class_means[:,current_cl[iter_dico],1] = (np.dot(D,alph)+np.dot(D2,alph))/2
                 class_means[:,current_cl[iter_dico],1] /= np.linalg.norm(class_means[:,current_cl[iter_dico],1])
 
-        # torch.save(class_means, \
-        #     './checkpoint/{}_run_{}_iteration_{}_class_means.pth'.format(args.ckp_prefix,iteration_total, iteration))
-        class_means_name = './checkpoint/{}_run_{}_iteration_{}_class_means.pth'.format(args.ckp_prefix,iteration_total, iteration)
-        torch.save(class_means, class_means_name)
+        torch.save(class_means, \
+            './checkpoint/{}_run_{}_iteration_{}_class_means.pth'.format(args.ckp_prefix,iteration_total, iteration))
 
         current_means = class_means[:, order[range(0,(iteration+1)*args.nb_cl)]]
         ##############################################################
         # Calculate validation error of model on the first nb_cl classes:
         map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
         print('Computing accuracy on the original batch of classes...')
-        evalset.test_data = X_valid_ori.astype('uint8')
-        evalset.test_labels = map_Y_valid_ori
+        # evalset.test_data = X_valid_ori.astype('uint8')
+        # evalset.test_labels = map_Y_valid_ori
+        current_eval_set = merge_images_labels(X_valid_ori, map_Y_valid_ori)
+        evalset.imgs = evalset.samples = current_eval_set
         evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                shuffle=False, num_workers=2)
+                shuffle=False, num_workers=args.num_workers, pin_memory=True)
         ori_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
         top1_acc_list_ori[iteration, :, iteration_total] = np.array(ori_acc).T
         ##############################################################
         # Calculate validation error of model on the cumul of classes:
         map_Y_valid_cumul = np.array([order_list.index(i) for i in Y_valid_cumul])
         print('Computing cumulative accuracy...')
-        evalset.test_data = X_valid_cumul.astype('uint8')
-        evalset.test_labels = map_Y_valid_cumul
+        # evalset.test_data = X_valid_cumul.astype('uint8')
+        # evalset.test_labels = map_Y_valid_cumul
+        current_eval_set = merge_images_labels(X_valid_cumul, map_Y_valid_cumul)
+        evalset.imgs = evalset.samples = current_eval_set
         evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                shuffle=False, num_workers=2)        
+                shuffle=False, num_workers=args.num_workers, pin_memory=True)        
         cumul_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
         top1_acc_list_cumul[iteration, :, iteration_total] = np.array(cumul_acc).T
         ##############################################################
@@ -499,209 +545,8 @@ for iteration_total in range(args.nb_runs):
         # cm_name = './checkpoint/{}_run_{}_iteration_{}_confusion_matrix.pth'.format(args.ckp_prefix,iteration_total, iteration)
         # with open(cm_name, 'wb') as f:
         #     pickle.dump(cm, f, 2) #for reading with Python 2
-        ##############################################################
-        if iteration == start_iter and args.cb_finetune: #for the convenience of evaluation
-            torch.save(tg_model, ckp_name.replace("/checkpoint/", "/checkpoint/AFTER_CBF_"))
-            torch.save(class_means, class_means_name.replace("/checkpoint/", "/checkpoint/AFTER_CBF_"))
-        ##############################################################
-        if args.less_forget and args.mr_loss and iteration > start_iter and args.cb_finetune:
-            # Class balance finetuning on the protoset
-            print("###############################")
-            print("Class balance finetuning on the protoset")
-            print("###############################")
-            trainset.train_data = np.concatenate(X_protoset_cumuls).astype('uint8')
-            map_Y_protoset_cumuls = np.array([order_list.index(i) for i in np.concatenate(Y_protoset_cumuls)])
-            trainset.train_labels = map_Y_protoset_cumuls
-            trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch_size,
-                shuffle=True, num_workers=2)
-            print('Max and Min of train labels: {}, {}'.format(min(trainset.train_labels), max(trainset.train_labels)))
-            print('Max and Min of valid labels: {}, {}'.format(min(testset.test_labels), max(testset.test_labels)))
-            ###############################
-            print('Computing accuracy on the protoset...')
-            evalset.test_data = np.concatenate(X_protoset_cumuls).astype('uint8')
-            evalset.test_labels = map_Y_protoset_cumuls
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
-            cbf_proto_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            ###############################
-            print('Computing accuracy on the old protoset...')
-            indices = np.array([i in range(0, iteration*args.nb_cl) for i in map_Y_protoset_cumuls])
-            evalset.test_data = np.concatenate(X_protoset_cumuls)[indices].astype('uint8')
-            evalset.test_labels = map_Y_protoset_cumuls[indices]
-            print('Max and Min of eval labels: {}, {}'.format(min(evalset.test_labels), max(evalset.test_labels)))
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
-            cbf_proto_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            ###############################
-            print('Computing accuracy on the new protoset...')
-            indices = np.array([i in range(iteration*args.nb_cl, (iteration+1)*args.nb_cl) for i in map_Y_protoset_cumuls])
-            evalset.test_data = np.concatenate(X_protoset_cumuls)[indices].astype('uint8')
-            evalset.test_labels = map_Y_protoset_cumuls[indices]
-            print('Max and Min of eval labels: {}, {}'.format(min(evalset.test_labels), max(evalset.test_labels)))
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
-            cbf_proto_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)           
-            ##############################################################
-            #tg_params = tg_model.parameters()
-            if args.ft_flag == 0: #everything is not updated 
-                ignored_params = list(map(id, tg_model.fc.parameters()))
-                base_params = filter(lambda p: id(p) not in ignored_params, 
-                        tg_model.parameters())
-                tg_params =[{'params': base_params, 'lr': 0, 'weight_decay': 0}, \
-                              {'params': tg_model.fc.fc1.parameters(), 'lr': 0, 'weight_decay': 0}, \
-                                {'params': tg_model.fc.fc2.parameters(), 'lr': 0, 'weight_decay': 0}]
-                fix_bn_flag = True
-                tg_model = tg_model.to(device)
-                ref_model = ref_model.to(device)
-                tg_ft_optimizer = optim.SGD(tg_params, lr=args.ft_base_lr, momentum=custom_momentum, weight_decay=custom_weight_decay)
-                tg_ft_lr_scheduler = lr_scheduler.MultiStepLR(tg_ft_optimizer, milestones=args.ft_lr_strat, gamma=lr_factor)
-                tg_model = incremental_train_and_eval_MR_LF(args.ft_epochs, tg_model, ref_model, tg_ft_optimizer, tg_ft_lr_scheduler, \
-                    trainloader, testloader, \
-                    iteration, start_iter, \
-                    cur_lamda, \
-                    args.dist, args.K, args.lw_mr, \
-                    fix_bn=fix_bn_flag)
-            elif args.ft_flag == 1: #only the novel embeddings are updated with the feature extractor fixed
-                ignored_params = list(map(id, tg_model.fc.parameters()))
-                base_params = filter(lambda p: id(p) not in ignored_params, 
-                        tg_model.parameters())
-                tg_params =[{'params': base_params, 'lr': 0, 'weight_decay': 0}, \
-                              {'params': tg_model.fc.fc1.parameters(), 'lr': 0, 'weight_decay': 0}, \
-                                {'params': tg_model.fc.fc2.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}]
-                fix_bn_flag = True
-                tg_model = tg_model.to(device)
-                ref_model = ref_model.to(device)
-                tg_ft_optimizer = optim.SGD(tg_params, lr=args.ft_base_lr, momentum=custom_momentum, weight_decay=custom_weight_decay)
-                tg_ft_lr_scheduler = lr_scheduler.MultiStepLR(tg_ft_optimizer, milestones=args.ft_lr_strat, gamma=lr_factor)
-                tg_model = incremental_train_and_eval_MR_LF(args.ft_epochs, tg_model, ref_model, tg_ft_optimizer, tg_ft_lr_scheduler, \
-                    trainloader, testloader, \
-                    iteration, start_iter, \
-                    cur_lamda, \
-                    args.dist, args.K, args.lw_mr, \
-                    fix_bn=fix_bn_flag)
-            elif args.ft_flag == 2: #both the old and novel embeddings are updated with the feature extractor fixed
-                ignored_params = list(map(id, tg_model.fc.parameters()))
-                base_params = filter(lambda p: id(p) not in ignored_params, 
-                        tg_model.parameters())
-                tg_params =[{'params': base_params, 'lr': 0, 'weight_decay': 0}, \
-                              {'params': tg_model.fc.fc1.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}, \
-                                {'params': tg_model.fc.fc2.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}]
-                fix_bn_flag = True
-                tg_model = tg_model.to(device)
-                ref_model = ref_model.to(device)
-                tg_ft_optimizer = optim.SGD(tg_params, lr=args.ft_base_lr, momentum=custom_momentum, weight_decay=custom_weight_decay)
-                tg_ft_lr_scheduler = lr_scheduler.MultiStepLR(tg_ft_optimizer, milestones=args.ft_lr_strat, gamma=lr_factor)
-                tg_model = incremental_train_and_eval_MR_LF(args.ft_epochs, tg_model, ref_model, tg_ft_optimizer, tg_ft_lr_scheduler, \
-                    trainloader, testloader, \
-                    iteration, start_iter, \
-                    cur_lamda, \
-                    args.dist, args.K, args.lw_mr, \
-                    fix_bn=fix_bn_flag)
-            elif args.ft_flag == 3: #everything is updated
-                ignored_params = list(map(id, tg_model.fc.parameters()))
-                base_params = filter(lambda p: id(p) not in ignored_params, 
-                        tg_model.parameters())
-                tg_params =[{'params': base_params, 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}, \
-                              {'params': tg_model.fc.fc1.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}, \
-                                {'params': tg_model.fc.fc2.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}]
-                fix_bn_flag = False
-                tg_model = tg_model.to(device)
-                ref_model = ref_model.to(device)
-                tg_ft_optimizer = optim.SGD(tg_params, lr=args.ft_base_lr, momentum=custom_momentum, weight_decay=custom_weight_decay)
-                tg_ft_lr_scheduler = lr_scheduler.MultiStepLR(tg_ft_optimizer, milestones=args.ft_lr_strat, gamma=lr_factor)
-                tg_model = incremental_train_and_eval_MR_LF(args.ft_epochs, tg_model, ref_model, tg_ft_optimizer, tg_ft_lr_scheduler, \
-                    trainloader, testloader, \
-                    iteration, start_iter, \
-                    cur_lamda, \
-                    args.dist, args.K, args.lw_mr, \
-                    fix_bn=fix_bn_flag)
-            #both the old and novel embeddings are updated with the feature extractor fixed
-            #the MR loss is removed in the CBF (ft_flag=4) and removed in all the training (ft_flag=5)
-            #the differences lie in the models for CBF
-            elif args.ft_flag == 4 or args.ft_flag == 5:
-                ignored_params = list(map(id, tg_model.fc.parameters()))
-                base_params = filter(lambda p: id(p) not in ignored_params, 
-                        tg_model.parameters())
-                tg_params =[{'params': base_params, 'lr': 0, 'weight_decay': 0}, \
-                              {'params': tg_model.fc.fc1.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}, \
-                                {'params': tg_model.fc.fc2.parameters(), 'lr': args.ft_base_lr, 'weight_decay': custom_weight_decay}]
-                fix_bn_flag = True
-                tg_model = tg_model.to(device)
-                ref_model = ref_model.to(device)
-                tg_ft_optimizer = optim.SGD(tg_params, lr=args.ft_base_lr, momentum=custom_momentum, weight_decay=custom_weight_decay)
-                tg_ft_lr_scheduler = lr_scheduler.MultiStepLR(tg_ft_optimizer, milestones=args.ft_lr_strat, gamma=lr_factor)
-                tg_model = incremental_train_and_eval_LF(args.ft_epochs, tg_model, ref_model, tg_ft_optimizer, tg_ft_lr_scheduler, \
-                    trainloader, testloader, \
-                    iteration, start_iter, \
-                    cur_lamda, \
-                    fix_bn=fix_bn_flag)
-            else:
-                print("Unknown ft_flag")
-                sys.exit()
-            ###############################
-            # tg_model = tg_model.to(device)
-            # ref_model = ref_model.to(device)
-            # tg_ft_optimizer = optim.SGD(tg_params, lr=args.ft_base_lr, momentum=custom_momentum, weight_decay=custom_weight_decay)
-            # tg_ft_lr_scheduler = lr_scheduler.MultiStepLR(tg_ft_optimizer, milestones=args.ft_lr_strat, gamma=lr_factor)
-            # tg_model = incremental_train_and_eval_MR_LF(args.ft_epochs, tg_model, ref_model, tg_ft_optimizer, tg_ft_lr_scheduler, \
-            #     trainloader, testloader, \
-            #     iteration, start_iter, \
-            #     cur_lamda, \
-            #     args.dist, args.K, args.lw_mr, \
-            #     fix_bn=fix_bn_flag)
-            torch.save(tg_model, ckp_name.replace("/checkpoint/", "/checkpoint/AFTER_CBF_"))
-            torch.save(class_means, class_means_name.replace("/checkpoint/", "/checkpoint/AFTER_CBF_")) 
-            ###############################################################
-            print('Computing accuracy on the protoset...')
-            evalset.test_data = np.concatenate(X_protoset_cumuls).astype('uint8')
-            evalset.test_labels = map_Y_protoset_cumuls
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
-            cbf_proto_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            ###############################
-            print('Computing accuracy on the old protoset...')
-            indices = np.array([i in range(0, iteration*args.nb_cl) for i in map_Y_protoset_cumuls])
-            evalset.test_data = np.concatenate(X_protoset_cumuls)[indices].astype('uint8')
-            evalset.test_labels = map_Y_protoset_cumuls[indices]
-            print('Max and Min of eval labels: {}, {}'.format(min(evalset.test_labels), max(evalset.test_labels)))
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
-            cbf_proto_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            ###############################
-            print('Computing accuracy on the new protoset...')
-            indices = np.array([i in range(iteration*args.nb_cl, (iteration+1)*args.nb_cl) for i in map_Y_protoset_cumuls])
-            evalset.test_data = np.concatenate(X_protoset_cumuls)[indices].astype('uint8')
-            evalset.test_labels = map_Y_protoset_cumuls[indices]
-            print('Max and Min of eval labels: {}, {}'.format(min(evalset.test_labels), max(evalset.test_labels)))
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            tg_feature_model = nn.Sequential(*list(tg_model.children())[:-1])
-            cbf_proto_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            ###############################################################
-            # Calculate validation error of model on the first nb_cl classes:
-            map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
-            print('Computing accuracy on the original batch of classes...')
-            evalset.test_data = X_valid_ori.astype('uint8')
-            evalset.test_labels = map_Y_valid_ori
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)
-            ori_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            top1_acc_list_ori[iteration, :, iteration_total] = np.array(ori_acc).T
-            ##############################################################
-            # Calculate validation error of model on the cumul of classes:
-            map_Y_valid_cumul = np.array([order_list.index(i) for i in Y_valid_cumul])
-            print('Computing cumulative accuracy...')
-            evalset.test_data = X_valid_cumul.astype('uint8')
-            evalset.test_labels = map_Y_valid_cumul
-            evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size,
-                    shuffle=False, num_workers=2)        
-            cumul_acc = compute_accuracy(tg_model, tg_feature_model, current_means, evalloader)
-            top1_acc_list_cumul[iteration, :, iteration_total] = np.array(cumul_acc).T                                      
+        ##############################################################   
+
     # Final save of the data
     torch.save(top1_acc_list_ori, \
         './checkpoint/{}_run_{}_top1_acc_list_ori.pth'.format(args.ckp_prefix, iteration_total))
