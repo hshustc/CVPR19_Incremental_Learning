@@ -1,7 +1,7 @@
 # CVPR19 Incremental Learning
 Thi repository is for the paper "Learning a Unified Classifier Incrementally via Rebalancing".
 
-[[Papers]](http://openaccess.thecvf.com/content_CVPR_2019/html/Hou_Learning_a_Unified_Classifier_Incrementally_via_Rebalancing_CVPR_2019_paper.html) [[Project Page]](https://hshustc.github.io/CVPR19_Incremental_Learning/)
+[[Paper]](http://openaccess.thecvf.com/content_CVPR_2019/html/Hou_Learning_a_Unified_Classifier_Incrementally_via_Rebalancing_CVPR_2019_paper.html) [[Project Page]](https://hshustc.github.io/CVPR19_Incremental_Learning/)
 
 # Instructions
 1. Dependencies
