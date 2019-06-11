@@ -17,7 +17,7 @@ Thi repository is for the paper "Learning a Unified Classifier Incrementally via
 Please cite the following paper if you find this useful in your research:
 ```
 @InProceedings{Hou_2019_CVPR,
-author = {Hou, Saihui and Pan, Xinyu and Change Loy, Chen and Wang, Zilei and Lin, Dahua},
+author = {Hou, Saihui and Pan, Xinyu and Loy, Chen Change and Wang, Zilei and Lin, Dahua},
 title = {Learning a Unified Classifier Incrementally via Rebalancing},
 booktitle = {The IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
 month = {June},
