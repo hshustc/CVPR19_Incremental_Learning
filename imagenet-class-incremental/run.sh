@@ -39,4 +39,3 @@ python eval_cumul_acc.py \
 --nb_cl_fg 50 --nb_cl 10 \
 --order checkpoint/seed_1993_seed_1993_subset_100_imagenet_order_run_0.pkl \
 --ckp_prefix checkpoint/seed_1993_rs_ratio_0.0_class_incremental_imagenet_nb_cl_fg_50_nb_cl_10_nb_protos_20_run_0_
-
